@@ -1,4 +1,4 @@
-# 03_member_B_sarima.R — Polar cap ozone (63-90S). Model: ARIMA() (SARIMA).
+# 03_StephQF_sarima.R — Polar cap ozone (63-90S). Model: ARIMA() (SARIMA).
 # Do not just paste auto_arima output — check residuals. Prior run: auto model
 # failed Ljung-Box at lag 24 even after 40+ manual grid combos (possible QBO/ENSO
 # non-12mo cycle). Report this honestly if reproduced.

@@ -41,17 +41,35 @@ o3area <- map_dfr(7:12, ~ read_ozone_month("to3areas", .x)) |>
   filter(year >= 2005, year <= 2025) |>
   arrange(year, mth)
 
-# Member D — 90-60S latitude band ozone, all 12 months, 2005-2025 (expect 252 obs)
-# CAUTION: raw file has 8 latitude-band columns. Peek raw text first to confirm
-# which column is 90-60S before trusting read_ozone_month's 4-col assumption.
-peek_latbnd <- readLines(paste0(base, "to3latbnds_09_toms+omi+omps.txt"), n = 12)
-writeLines(peek_latbnd)
-# TODO(member D): adjust read_ozone_month (or write read_ozone_month_latbnd)
-# once column layout is confirmed, then build o3lat analogous to o3min/o3cap.
+# Member D — 90-60S latitude band ozone, all 12 months, 2005-2025 (252 obs)
+# Raw file has 8 lat-band columns: Year(1) Global(2) 90S--60S(3) 60S--30S(4)
+# 30S--10S(5) 10S--10N(6) 10N--30N(7) 30N--60N(8) 60N--90N(9). Confirmed by
+# peeking to3latbnds_09_toms+omi+omps.txt — 90-60S is column 3.
+read_ozone_month_latbnd <- function(mm, col_idx = 3) {
+  url <- paste0(base, "to3latbnds_", sprintf("%02d", mm), "_toms+omi+omps.txt")
+  raw <- readLines(url)
+  raw <- raw[grepl("^[0-9]{4}", trimws(raw))]
+  df  <- read.table(text = paste(raw, collapse = "\n"))
+  val <- df[[col_idx]]
+  val[val == -9999] <- NA
+  tibble(year = df$V1, value = val, mth = mm)
+}
+
+o3lat <- map_dfr(1:12, ~ read_ozone_month_latbnd(.x)) |>
+  filter(year >= 2005, year <= 2025) |>
+  arrange(year, mth) |>
+  mutate(month = yearmonth(paste(year, mth)),
+         value = zoo::na.approx(value)) |>
+  as_tsibble(index = month) |>
+  select(month, o3_lat = value)
+
+dir.create("data", showWarnings = FALSE)
+dir.create("output", showWarnings = FALSE)
 
 saveRDS(o3min, "data/o3min.rds")
 saveRDS(o3cap, "data/o3cap.rds")
 saveRDS(o3area, "data/o3area.rds")
+saveRDS(o3lat, "data/o3lat.rds")
 
 cat("o3min:", nrow(o3min), "obs | o3cap:", nrow(o3cap),
-    "obs | o3area:", nrow(o3area), "obs\n")
+    "obs | o3area:", nrow(o3area), "obs | o3lat:", nrow(o3lat), "obs\n")

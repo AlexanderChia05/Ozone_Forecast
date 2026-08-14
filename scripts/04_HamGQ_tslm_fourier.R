@@ -1,4 +1,4 @@
-# 04_member_C_tslm_fourier.R — Ozone hole area, Jul-Dec only (m=6 in-season
+# 04_HamGQ_tslm_fourier.R — Ozone hole area, Jul-Dec only (m=6 in-season
 # series, 126 obs). Model: harmonic regression TSLM(y ~ trend() + fourier()).
 # Series has true zeros (6.3%, season edges) -> MAPE undefined/unstable, use MASE.
 # Test set = last in-season "season" = last 6 obs, not calendar last-12-months.

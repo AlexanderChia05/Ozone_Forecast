@@ -1,4 +1,4 @@
-# 02_member_A_ets.R — Minimum ozone series. Model: Holt-Winters ETS().
+# 02_ChanYH_ets.R — Minimum ozone series. Model: Holt-Winters ETS().
 # Benchmark: SNAIVE. Metric: MASE (primary), RMSE/MAE (secondary), MAPE (reference).
 
 source("scripts/00_setup.R")
