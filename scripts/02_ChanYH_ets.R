@@ -46,7 +46,8 @@ fit_family <- train |> model(
   ets_auto    = ETS(o3_min),                                              # current pick (anchor)
   hw_damped   = ETS(o3_min ~ error("A") + trend("Ad") + season("A")),     # only trend variant AICc hasn't already ruled out
   theta       = THETA(o3_min),                                            # different mechanism entirely, best shot at beating SNAIVE
-  ets_boxcox  = ETS(box_cox(o3_min, lambda) ~ error("A") + trend("N") + season("A"))  # variance-stabilised — may fix the failed Ljung-Box
+  ets_boxcox  = ETS(box_cox(o3_min, lambda) ~ error("A") + trend("N") + season("A")),  # variance-stabilised — may fix the failed Ljung-Box
+  stl_ets     = decomposition_model(STL(o3_min, robust = TRUE), ETS(season_adjust))     # STL strips the strong (0.93) season first, ETS only handles the leftover
 )
 
 fc_family <- fit_family |> forecast(h = h)
@@ -63,7 +64,7 @@ augment(fit_family) |>
 # Residual diagnostics for EVERY family member (residual time plot + ACF +
 # histogram, all 3 in one call) — not just the current pick. Saved as PNG.
 dir.create("output/plots/ChanYH_ets", recursive = TRUE, showWarnings = FALSE)
-for (m in c("ets_auto", "hw_damped", "theta", "ets_boxcox")) {
+for (m in c("ets_auto", "hw_damped", "theta", "ets_boxcox", "stl_ets")) {
   p <- fit_family |> select(all_of(m)) |> gg_tsresiduals()
   print(p)
   ggsave(paste0("output/plots/ChanYH_ets/resid_", m, ".png"),
@@ -88,7 +89,8 @@ o3min |>
     ets_auto   = ETS(o3_min),
     hw_damped  = ETS(o3_min ~ error("A") + trend("Ad") + season("A")),
     theta      = THETA(o3_min),
-    ets_boxcox = ETS(box_cox(o3_min, lambda) ~ error("A") + trend("N") + season("A"))
+    ets_boxcox = ETS(box_cox(o3_min, lambda) ~ error("A") + trend("N") + season("A")),
+    stl_ets    = decomposition_model(STL(o3_min, robust = TRUE), ETS(season_adjust))
   ) |>
   forecast(h = 12) |>
   accuracy(o3min) |>

@@ -35,7 +35,9 @@ fit_family <- train |> model(
   stl_arima    = decomposition_model(STL(o3_lat, robust = TRUE),
                                       ARIMA(season_adjust)),
   stl_theta    = decomposition_model(STL(o3_lat, robust = TRUE),
-                                      THETA(season_adjust))
+                                      THETA(season_adjust)),
+  stl_arima_nr = decomposition_model(STL(o3_lat, robust = FALSE),          # non-robust: let 2019 SSW inform the trend estimate directly, pair with the closest-to-baseline candidate
+                                      ARIMA(season_adjust))
 )
 
 fc_family <- fit_family |> forecast(h = h)
@@ -53,7 +55,7 @@ augment(fit_family) |>
 # Residual diagnostics for EVERY family member (residual time plot + ACF +
 # histogram, all 3 in one call) — not just the current pick. Saved as PNG.
 dir.create("output/plots/ChiaZY_stl", recursive = TRUE, showWarnings = FALSE)
-for (m in c("stl_rwdrift", "stl_ets", "stl_arima", "stl_theta")) {
+for (m in c("stl_rwdrift", "stl_ets", "stl_arima", "stl_theta", "stl_arima_nr")) {
   p <- fit_family |> select(all_of(m)) |> gg_tsresiduals()
   print(p)
   ggsave(paste0("output/plots/ChiaZY_stl/resid_", m, ".png"),
@@ -81,7 +83,9 @@ o3lat |>
     stl_arima   = decomposition_model(STL(o3_lat, robust = TRUE),
                                        ARIMA(season_adjust)),
     stl_theta   = decomposition_model(STL(o3_lat, robust = TRUE),
-                                       THETA(season_adjust))
+                                       THETA(season_adjust)),
+    stl_arima_nr = decomposition_model(STL(o3_lat, robust = FALSE),
+                                        ARIMA(season_adjust))
   ) |>
   forecast(h = 12) |>
   accuracy(o3lat) |>
