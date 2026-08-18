@@ -47,7 +47,9 @@ fit_family <- train |> model(
   hw_damped   = ETS(o3_min ~ error("A") + trend("Ad") + season("A")),     # only trend variant AICc hasn't already ruled out
   theta       = THETA(o3_min),                                            # different mechanism entirely, best shot at beating SNAIVE
   ets_boxcox  = ETS(box_cox(o3_min, lambda) ~ error("A") + trend("N") + season("A")),  # variance-stabilised — may fix the failed Ljung-Box
-  stl_ets     = decomposition_model(STL(o3_min, robust = TRUE), ETS(season_adjust))     # STL strips the strong (0.93) season first, ETS only handles the leftover
+  stl_ets     = decomposition_model(STL(o3_min, robust = TRUE), ETS(season_adjust)),    # STL strips the strong (0.93) season first, ETS only handles the leftover
+  stl_arima   = decomposition_model(STL(o3_min, robust = FALSE), ARIMA(season_adjust)),  # same recipe that won for member D — non-robust STL lets 2019 SSW inform the trend
+  ets_mult    = ETS(o3_min ~ error("M") + trend("N") + season("M"))                      # auto ETS picked additive by AICc, but never forced multiplicative for out-of-sample comparison — series is always positive, so it's valid here
 )
 
 fc_family <- fit_family |> forecast(h = h)
@@ -64,7 +66,7 @@ augment(fit_family) |>
 # Residual diagnostics for EVERY family member (residual time plot + ACF +
 # histogram, all 3 in one call) — not just the current pick. Saved as PNG.
 dir.create("output/plots/ChanYH_ets", recursive = TRUE, showWarnings = FALSE)
-for (m in c("ets_auto", "hw_damped", "theta", "ets_boxcox", "stl_ets")) {
+for (m in c("ets_auto", "hw_damped", "theta", "ets_boxcox", "stl_ets", "stl_arima", "ets_mult")) {
   p <- fit_family |> select(all_of(m)) |> gg_tsresiduals()
   print(p)
   ggsave(paste0("output/plots/ChanYH_ets/resid_", m, ".png"),
@@ -90,7 +92,9 @@ o3min |>
     hw_damped  = ETS(o3_min ~ error("A") + trend("Ad") + season("A")),
     theta      = THETA(o3_min),
     ets_boxcox = ETS(box_cox(o3_min, lambda) ~ error("A") + trend("N") + season("A")),
-    stl_ets    = decomposition_model(STL(o3_min, robust = TRUE), ETS(season_adjust))
+    stl_ets    = decomposition_model(STL(o3_min, robust = TRUE), ETS(season_adjust)),
+    stl_arima  = decomposition_model(STL(o3_min, robust = FALSE), ARIMA(season_adjust)),
+    ets_mult   = ETS(o3_min ~ error("M") + trend("N") + season("M"))
   ) |>
   forecast(h = 12) |>
   accuracy(o3min) |>
