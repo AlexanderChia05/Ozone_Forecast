@@ -24,10 +24,12 @@ fit_B <- (o3cap |> filter(month <= max(month) - h)) |>
 acc_B <- fit_B |> forecast(h = h) |> accuracy(o3cap) |>
   mutate(member = "B", series = "polar_cap_ozone")
 
-# Member D — 90-60S latitude band ozone, NNAR
+# Member D — 90-60S latitude band ozone, STL decomposition + RW(drift)
 fit_D <- (o3lat |> filter(month <= max(month) - h)) |>
-  model(snaive = SNAIVE(o3_lat), nnar = NNETAR(o3_lat))
-acc_D <- fit_D |> forecast(h = h, times = 20) |> accuracy(o3lat) |>
+  model(snaive = SNAIVE(o3_lat),
+        stl_rwdrift = decomposition_model(STL(o3_lat, robust = TRUE),
+                                           RW(season_adjust ~ drift())))
+acc_D <- fit_D |> forecast(h = h) |> accuracy(o3lat) |>
   mutate(member = "D", series = "latband_ozone")
 
 tsibble_summary <- bind_rows(acc_A, acc_B, acc_D) |>

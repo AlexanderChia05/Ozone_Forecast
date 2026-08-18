@@ -1,11 +1,13 @@
-# 05_ChiaZY_nnar.R — 90-60S latitude band ozone. Model: NNETAR() (NNAR).
-# Benchmark: SNAIVE. Metric: MASE (primary), RMSE/MAE (secondary), MAPE (reference).
-# set.seed() required for reproducibility — seed recorded here (2026) for the report.
+# 05_ChiaZY_stl.R — 90-60S latitude band ozone. Family: STL decomposition
+# forecasting (decompose season/trend/remainder, model the seasonally-
+# adjusted part, reseasonalize). Replaces the earlier NNAR() pick — small
+# training set (240 obs) made NNAR unstable (MASE 1.19, lost to SNAIVE);
+# STL is a smoother, not a trained parametric/NN model, so sample size is
+# not a constraint here, and its robust option down-weights outlier years
+# (e.g. 2019 SSW) when estimating trend, which NNAR/ETS cannot do.
 
 source("scripts/00_setup.R")
 o3lat <- readRDS("data/o3lat.rds")
-
-set.seed(2026)
 
 # EDA
 o3lat |> autoplot(o3_lat)
@@ -20,21 +22,67 @@ kpss.test(o3lat$o3_lat)   # want p > 0.05
 h <- 12
 train <- o3lat |> filter(month <= max(month) - h)
 
-fit <- train |> model(
-  snaive = SNAIVE(o3_lat),
-  nnar   = NNETAR(o3_lat)
+# ── STL decomposition family: 4 candidates, same robust STL split, four
+# different models on the seasonally-adjusted series. Top pick: STL +
+# RW(drift) — simplest structure on the deseasonalized series, least
+# overfit risk with 240 obs.
+fit_family <- train |> model(
+  snaive       = SNAIVE(o3_lat),
+  stl_rwdrift  = decomposition_model(STL(o3_lat, robust = TRUE),
+                                      RW(season_adjust ~ drift())),
+  stl_ets      = decomposition_model(STL(o3_lat, robust = TRUE),
+                                      ETS(season_adjust)),
+  stl_arima    = decomposition_model(STL(o3_lat, robust = TRUE),
+                                      ARIMA(season_adjust)),
+  stl_theta    = decomposition_model(STL(o3_lat, robust = TRUE),
+                                      THETA(season_adjust))
 )
-fc <- fit |> forecast(h = h, times = 20)
-fc |> accuracy(o3lat) |> select(.model, MASE, RMSE, MAE, MAPE) |> arrange(MASE)
-fc |> autoplot(o3lat, level = c(80, 95))
 
-# Network structure — record NNAR(p,P,size) in the report
-fit |> select(nnar) |> report()
+fc_family <- fit_family |> forecast(h = h)
+acc_family <- fc_family |> accuracy(o3lat) |>
+  select(.model, MASE, RMSE, MAE, MAPE) |> arrange(MASE)
+print(acc_family)
+fc_family |> autoplot(o3lat, level = c(80, 95))
 
-# 5-fold rolling-origin cross-validation
+# Ljung-Box for every family member — is each model's residual actually random?
+augment(fit_family) |>
+  features(.innov, ljung_box, lag = 24) |>
+  arrange(lb_pvalue) |>
+  print()
+
+# Residual diagnostics for EVERY family member (residual time plot + ACF +
+# histogram, all 3 in one call) — not just the current pick. Saved as PNG.
+dir.create("output/plots/ChiaZY_stl", recursive = TRUE, showWarnings = FALSE)
+for (m in c("stl_rwdrift", "stl_ets", "stl_arima", "stl_theta")) {
+  p <- fit_family |> select(all_of(m)) |> gg_tsresiduals()
+  print(p)
+  ggsave(paste0("output/plots/ChiaZY_stl/resid_", m, ".png"),
+         p, width = 8, height = 6, dpi = 150)
+}
+
+# Overfitting check: in-sample vs out-of-sample MASE gap per model
+acc_train <- fit_family |> accuracy() |>
+  select(.model, MASE_train = MASE, RMSE_train = RMSE)
+acc_test <- acc_family |> select(.model, MASE_test = MASE, RMSE_test = RMSE)
+acc_train |> left_join(acc_test, by = ".model") |>
+  mutate(overfit_gap = MASE_test - MASE_train) |>
+  arrange(desc(overfit_gap)) |>
+  print()
+
+# 5-fold rolling-origin cross-validation — ALL 4 family candidates + SNAIVE.
 o3lat |>
   stretch_tsibble(.init = 180, .step = 12) |>
-  model(snaive = SNAIVE(o3_lat), nnar = NNETAR(o3_lat)) |>
+  model(
+    snaive      = SNAIVE(o3_lat),
+    stl_rwdrift = decomposition_model(STL(o3_lat, robust = TRUE),
+                                       RW(season_adjust ~ drift())),
+    stl_ets     = decomposition_model(STL(o3_lat, robust = TRUE),
+                                       ETS(season_adjust)),
+    stl_arima   = decomposition_model(STL(o3_lat, robust = TRUE),
+                                       ARIMA(season_adjust)),
+    stl_theta   = decomposition_model(STL(o3_lat, robust = TRUE),
+                                       THETA(season_adjust))
+  ) |>
   forecast(h = 12) |>
   accuracy(o3lat) |>
   group_by(.model) |>
