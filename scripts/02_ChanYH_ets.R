@@ -35,9 +35,10 @@ augment(fit) |> filter(.model == "ets") |> features(.innov, ljung_box, lag = 24)
 # Rolling-origin CV for the single current-pick model is folded into the
 # full family sweep below (every candidate goes through it, none skipped).
 
-# ── Family sweep: 4 candidates, each with a real shot at matching/beating
-# SNAIVE and the current pick (ets_auto). Dropped SES/Holt/Holt-undamped —
-# AICc already rejected a trend term for this series (auto chose "N"), so a
+# ── Family sweep: 6 candidates, all ETS-engine models (no ARIMA/RW-engine
+# decomposition variants — those aren't ETS family, dropped stl_arima and
+# stl_arima_r for that reason). Dropped SES/Holt/Holt-undamped too — AICc
+# already rejected a trend term for this series (auto chose "N"), so a
 # no-season or undamped-trend variant is a priori worse and not worth a slot.
 lambda <- o3min |> features(o3_min, features = guerrero) |> pull(lambda_guerrero)
 
@@ -47,9 +48,9 @@ fit_family <- train |> model(
   hw_damped   = ETS(o3_min ~ error("A") + trend("Ad") + season("A")),     # only trend variant AICc hasn't already ruled out
   theta       = THETA(o3_min),                                            # different mechanism entirely, best shot at beating SNAIVE
   ets_boxcox  = ETS(box_cox(o3_min, lambda) ~ error("A") + trend("N") + season("A")),  # variance-stabilised — may fix the failed Ljung-Box
-  stl_ets     = decomposition_model(STL(o3_min, robust = TRUE), ETS(season_adjust)),    # STL strips the strong (0.93) season first, ETS only handles the leftover
-  stl_arima   = decomposition_model(STL(o3_min, robust = FALSE), ARIMA(season_adjust)),  # same recipe that won for member D — non-robust STL lets 2019 SSW inform the trend
-  ets_mult    = ETS(o3_min ~ error("M") + trend("N") + season("M"))                      # auto ETS picked additive by AICc, but never forced multiplicative for out-of-sample comparison — series is always positive, so it's valid here
+  stl_ets     = decomposition_model(STL(o3_min, robust = TRUE), ETS(season_adjust)),    # STL strips the strong (0.93) season first, ETS engine handles the leftover — still an ETS-family model, just preprocessed
+  ets_mult    = ETS(o3_min ~ error("M") + trend("N") + season("M")),                     # auto ETS picked additive by AICc, but never forced multiplicative for out-of-sample comparison — series is always positive, so it's valid here
+  bagged_ets  = BAGGED_ETS(o3_min, times = 10)                                            # bootstrap-aggregated ETS — every other candidate here is high-variance (wins hold-out, collapses on rolling CV); bagging exists specifically to cut variance without changing bias much. times=10 (not the default 100) to keep this tractable on the free tier across 6 rolling folds
 )
 
 fc_family <- fit_family |> forecast(h = h)
@@ -66,7 +67,7 @@ augment(fit_family) |>
 # Residual diagnostics for EVERY family member (residual time plot + ACF +
 # histogram, all 3 in one call) — not just the current pick. Saved as PNG.
 dir.create("output/plots/ChanYH_ets", recursive = TRUE, showWarnings = FALSE)
-for (m in c("ets_auto", "hw_damped", "theta", "ets_boxcox", "stl_ets", "stl_arima", "ets_mult")) {
+for (m in c("ets_auto", "hw_damped", "theta", "ets_boxcox", "stl_ets", "ets_mult", "bagged_ets")) {
   p <- fit_family |> select(all_of(m)) |> gg_tsresiduals()
   print(p)
   ggsave(paste0("output/plots/ChanYH_ets/resid_", m, ".png"),
@@ -93,8 +94,8 @@ o3min |>
     theta      = THETA(o3_min),
     ets_boxcox = ETS(box_cox(o3_min, lambda) ~ error("A") + trend("N") + season("A")),
     stl_ets    = decomposition_model(STL(o3_min, robust = TRUE), ETS(season_adjust)),
-    stl_arima  = decomposition_model(STL(o3_min, robust = FALSE), ARIMA(season_adjust)),
-    ets_mult   = ETS(o3_min ~ error("M") + trend("N") + season("M"))
+    ets_mult   = ETS(o3_min ~ error("M") + trend("N") + season("M")),
+    bagged_ets = BAGGED_ETS(o3_min, times = 10)
   ) |>
   forecast(h = 12) |>
   accuracy(o3min) |>
