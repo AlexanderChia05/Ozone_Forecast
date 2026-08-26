@@ -1,70 +1,62 @@
-# 06_group_comparison.R — group leader script. Combine all four members'
-# hold-out MASE/RMSE/MAE into one comparison table for the group report.
-# Requires data/o3min.rds, o3cap.rds, o3area.rds, o3lat.rds already built
-# (run 01_data_pull.R first).
+# 06_group_comparison.R - group leader script. SHARED TOPIC: polar cap ozone
+# (o3cap, 63-90S, m=12). Combine all four members' best-family model (chosen
+# from their own family sweep in 02/03/04/05) into one train/test comparison,
+# and check whether the 4 best models' train-vs-test gap stays within 10%.
+# Requires data/o3cap.rds (run 01_data_pull.R first).
 
 source("scripts/00_setup.R")
-o3min <- readRDS("data/o3min.rds")
 o3cap <- readRDS("data/o3cap.rds")
-o3area <- readRDS("data/o3area.rds")
-o3lat <- readRDS("data/o3lat.rds")
 
 h <- 12
-set.seed(2026)
+train <- o3cap |> filter(month <= max(month) - h)
 
-# Member A — minimum ozone, ETS
-fit_A <- (o3min |> filter(month <= max(month) - h)) |>
-  model(snaive = SNAIVE(o3_min), ets = ETS(o3_min))
-acc_A <- fit_A |> forecast(h = h) |> accuracy(o3min) |>
-  mutate(member = "A", series = "min_ozone")
-
-# Member B — polar cap ozone, ARIMA
-fit_B <- (o3cap |> filter(month <= max(month) - h)) |>
-  model(snaive = SNAIVE(o3_cap), arima = ARIMA(o3_cap))
-acc_B <- fit_B |> forecast(h = h) |> accuracy(o3cap) |>
-  mutate(member = "B", series = "polar_cap_ozone")
-
-# Member D — 90-60S latitude band ozone, STL decomposition + RW(drift)
-fit_D <- (o3lat |> filter(month <= max(month) - h)) |>
-  model(snaive = SNAIVE(o3_lat),
-        stl_rwdrift = decomposition_model(STL(o3_lat, robust = TRUE),
-                                           RW(season_adjust ~ drift())))
-acc_D <- fit_D |> forecast(h = h) |> accuracy(o3lat) |>
-  mutate(member = "D", series = "latband_ozone")
-
-tsibble_summary <- bind_rows(acc_A, acc_B, acc_D) |>
-  select(member, series, .model, MASE, RMSE, MAE, MAPE)
-
-# Member C — hole area (m=6 in-season, base R, not a tsibble model) —
-# recompute inline since 04_member_C_tslm_fourier.R uses plain vectors/lm().
-oc <- o3area$value
-n <- length(oc); K <- 2; h_c <- 6
-t_idx <- seq_len(n)
-Xf <- cbind(trend = t_idx,
-            sapply(1:K, function(k) sin(2 * pi * k * t_idx / 6)),
-            sapply(1:K, function(k) cos(2 * pi * k * t_idx / 6)))
-train_idx <- 1:(n - h_c); test_idx <- (n - h_c + 1):n
-fit_tslm_c <- lm(oc[train_idx] ~ Xf[train_idx, ])
-pred_tslm_c <- cbind(1, Xf[test_idx, ]) %*% coef(fit_tslm_c)
-pred_snaive_c <- oc[test_idx - 6]
-actual_c <- oc[test_idx]
-mase_c <- function(actual, pred, train, m = 6) {
-  mean(abs(actual - pred)) / mean(abs(diff(train, lag = m)))
-}
-acc_C <- tibble(
-  member = "C", series = "hole_area_m6",
-  .model = c("snaive", "tslm"),
-  MASE = c(mase_c(actual_c, pred_snaive_c, oc[train_idx]),
-           mase_c(actual_c, pred_tslm_c, oc[train_idx])),
-  RMSE = c(sqrt(mean((actual_c - pred_snaive_c)^2)),
-           sqrt(mean((actual_c - pred_tslm_c)^2))),
-  MAE  = c(mean(abs(actual_c - pred_snaive_c)),
-           mean(abs(actual_c - pred_tslm_c))),
-  MAPE = NA_real_  # undefined — series has exact zeros
+# Each member's chosen family, one candidate per family (swap in whichever
+# family-sweep winner each member settles on after diagnostics).
+fit <- train |> model(
+    snaive       = SNAIVE(o3_cap),
+      ets_A        = ETS(o3_cap),
+      arima_B      = ARIMA(o3_cap),
+      tslm_C       = TSLM(o3_cap ~ trend() + fourier(K = 2)),
+      stl_D        = decomposition_model(STL(o3_cap, robust = TRUE),
+                                                                               RW(season_adjust ~ drift()))
 )
 
-summary_tbl <- bind_rows(tsibble_summary, acc_C) |>
-  arrange(member, MASE)
+fc <- fit |> forecast(h = h)
+acc_test <- fc |> accuracy(o3cap) |>
+    select(member = .model, MASE, RMSE, MAE, MAPE) |> arrange(MASE)
+print(acc_test)
 
+# Ljung-Box p-value per model - residuals must look random (p > 0.05)
+lb <- augment(fit) |>
+    features(.innov, ljung_box, lag = 24) |>
+    rename(member = .model)
+print(lb)
+
+# ACF-in-bounds check (MUST) - count residual ACF lags outside +-1.96/sqrt(n)
+acf_check <- fit |>
+    augment() |>
+    as_tibble() |>
+    group_by(.model) |>
+    summarise(n_lags_out = acf_out_of_bounds(.innov, lag.max = 24)) |>
+    rename(member = .model)
+print(acf_check)
+
+# Train-vs-test MASE/RMSE gap - must be within 10% of the test value for all
+# 4 best models, per the group's agreed comparability criterion.
+acc_train <- fit |> accuracy() |>
+    select(member = .model, MASE_train = MASE, RMSE_train = RMSE)
+gap_tbl <- acc_train |> left_join(acc_test |> select(member, MASE_test = MASE, RMSE_test = RMSE), by = "member") |>
+    mutate(mase_gap_pct = abs(MASE_test - MASE_train) / MASE_test,
+                    rmse_gap_pct = abs(RMSE_test - RMSE_train) / RMSE_test,
+                    within_10pct = mase_gap_pct <= 0.10 & rmse_gap_pct <= 0.10) |>
+    arrange(desc(mase_gap_pct))
+print(gap_tbl)
+
+summary_tbl <- acc_test |>
+    left_join(lb, by = "member") |>
+    left_join(acf_check, by = "member") |>
+    left_join(gap_tbl |> select(member, mase_gap_pct, rmse_gap_pct, within_10pct), by = "member")
 print(summary_tbl)
+
+dir.create("output", showWarnings = FALSE)
 write.csv(summary_tbl, "output/model_comparison_summary.csv", row.names = FALSE)
