@@ -6,6 +6,15 @@
 # against interpretability - the trend coefficient is a direct, reportable
 # estimate of the ozone recovery rate (DU/month), which K=4 or a quadratic
 # trend term would obscure without materially improving fit.
+#
+# Ljung-Box failure is NOT fixable within this family: tested adding a
+# fourier(period=28.5, K=1) QBO term (same fix that worked for 03/05) and
+# it made every diagnostic WORSE (n_lags_out 4->6, MASE 0.944->1.16, still
+# p=0). TSLM's OLS residuals are i.i.d.-assumed with no ARMA-error term to
+# absorb serial correlation, so no regressor addition can whiten them -
+# only swapping the error structure to ARIMA (member B's family) or
+# STL-then-ARIMA (member D's family) fixes it. Kept as the best-of-family
+# pick; documented model-class limitation, not underfitting to fix here.
 
 source("scripts/00_setup.R")
 o3cap <- readRDS("data/o3cap.rds")

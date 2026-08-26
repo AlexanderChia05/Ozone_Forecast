@@ -10,19 +10,22 @@ o3cap <- readRDS("data/o3cap.rds")
 h <- 12
 train <- o3cap |> filter(month <= max(month) - h)
 
-# The 4 recommended models, one per family:
-#   A - ETS, damped trend             (02_ChanYH_ets.R)
-#   B - ARIMA errors + annual/QBO Fourier regressors (03_StephQF_sarima.R)
-#   C - TSLM, trend + Fourier(K=2)    (04_HamGQ_tslm_fourier.R)
-#   D - STL(robust) + RW(drift)       (05_ChiaZY_stl.R)
+# The 4 recommended models, one per family (see 02-05 headers for the
+# diagnostics behind each pick):
+#   A - ETS, multiplicative Holt-Winters (02_ChanYH_ets.R) - best-of-family;
+#       cannot pass Ljung-Box for this topic (no regressor slot in ETS)
+#   B - ARIMA errors + annual(K=1)/QBO(K=1) Fourier (03_StephQF_sarima.R)
+#   C - TSLM, trend + Fourier(K=2)    (04_HamGQ_tslm_fourier.R) - best-of-
+#       family; cannot pass Ljung-Box for this topic (OLS has no ARMA error)
+#   D - STL(robust) + ARIMA(remainder) (05_ChiaZY_stl.R)
 fit <- train |> model(
   snaive  = SNAIVE(o3_cap),
-  ets_A   = ETS(o3_cap ~ error("A") + trend("Ad") + season("A")),
-  arima_B = ARIMA(o3_cap ~ fourier(period = 12, K = 2) +
+  ets_A   = ETS(o3_cap ~ error("M") + trend("Ad") + season("M")),
+  arima_B = ARIMA(o3_cap ~ fourier(period = 12, K = 1) +
                     fourier(period = 28.5, K = 1) + pdq()),
   tslm_C  = TSLM(o3_cap ~ trend() + fourier(K = 2)),
   stl_D   = decomposition_model(STL(o3_cap, robust = TRUE),
-                                 RW(season_adjust ~ drift()))
+                                 ARIMA(season_adjust ~ pdq()))
 )
 
 fc <- fit |> forecast(h = h)

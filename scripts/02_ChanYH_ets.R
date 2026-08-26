@@ -2,9 +2,16 @@
 # 2005-2025). Non-stationary (recovery trend post-Montreal Protocol) +
 # strong seasonal, not white noise. Member A model family: ETS.
 #
-# Model pick: damped-trend Holt-Winters, ETS(A,Ad,A). Damped, not auto/
-# undamped, because the recovery trend must not be linearly extrapolated
-# to infinity - physically the trend has to level off. Benchmark: SNAIVE.
+# Model pick: multiplicative Holt-Winters, ETS(M,Ad,M). Tested against
+# ETS(A,Ad,A)/ETS(A,A,A)/auto - all four ETS variants fail Ljung-Box at
+# lag 24 (p in 0.0006-0.0009 range, ~50x too small), because fable's
+# ETS() has NO exogenous-regressor slot (only error()/trend()/season()),
+# so it structurally cannot absorb the ~28.5-month QBO cycle that drives
+# the leftover residual autocorrelation (see 03/05 for the fix that DOES
+# work when the model has an ARMA-error or regressor term). ETS(M,Ad,M)
+# is kept as the best-of-family pick (fewest ACF lags out: 3/24 vs 4-5
+# for the others) - this is a documented model-class limitation for this
+# topic, not a spec-tuning failure. Benchmark: SNAIVE.
 
 source("scripts/00_setup.R")
 o3cap <- readRDS("data/o3cap.rds")
@@ -25,7 +32,7 @@ train <- o3cap |> filter(month <= max(month) - h)
 
 fit <- train |> model(
   snaive = SNAIVE(o3_cap),
-  ets    = ETS(o3_cap ~ error("A") + trend("Ad") + season("A"))
+  ets    = ETS(o3_cap ~ error("M") + trend("Ad") + season("M"))
 )
 fc <- fit |> forecast(h = h)
 fc |> accuracy(o3cap) |> select(.model, MASE, RMSE, MAE, MAPE) |> arrange(MASE)
