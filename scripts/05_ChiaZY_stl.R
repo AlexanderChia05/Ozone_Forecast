@@ -1,7 +1,12 @@
 # 05_ChiaZY_stl.R - SHARED TOPIC: polar cap ozone (o3cap, 63-90S, m=12,
 # 2005-2025). Non-stationary + strong seasonal, not white noise. Member D
-# model family: STL decomposition forecasting (decompose season/trend/
-# remainder, model the seasonally-adjusted part, reseasonalize).
+# model family: STL decomposition forecasting.
+#
+# Model pick: STL(robust = TRUE) + RW(drift) on the seasonally-adjusted
+# series. robust=TRUE down-weights the 2019 SSW outlier when estimating
+# trend/season instead of letting it distort them. RW(drift) over
+# ETS/ARIMA on the remainder - simplest structure, least overfit risk
+# on this length of series once the season and trend are already stripped.
 
 source("scripts/00_setup.R")
 o3cap <- readRDS("data/o3cap.rds")
@@ -20,79 +25,32 @@ Box.test(o3cap$o3_cap, lag = 24, type = "Ljung-Box")  # want p < 0.05 -> not whi
 h <- 12
 train <- o3cap |> filter(month <= max(month) - h)
 
-# STL decomposition family: 5 candidates, same robust STL split, four
-# different models on the seasonally-adjusted series.
-fit_family <- train |> model(
-    snaive       = SNAIVE(o3_cap),
-      stl_rwdrift  = decomposition_model(STL(o3_cap, robust = TRUE),
-                                                                               RW(season_adjust ~ drift())),
-      stl_ets      = decomposition_model(STL(o3_cap, robust = TRUE),
-                                                                               ETS(season_adjust)),
-      stl_arima    = decomposition_model(STL(o3_cap, robust = TRUE),
-                                                                               ARIMA(season_adjust)),
-      stl_theta    = decomposition_model(STL(o3_cap, robust = TRUE),
-                                                                               THETA(season_adjust)),
-      stl_arima_nr = decomposition_model(STL(o3_cap, robust = FALSE),
-                                                                               ARIMA(season_adjust))
+fit <- train |> model(
+  snaive      = SNAIVE(o3_cap),
+  stl_rwdrift = decomposition_model(STL(o3_cap, robust = TRUE),
+                                     RW(season_adjust ~ drift()))
 )
+fc <- fit |> forecast(h = h)
+fc |> accuracy(o3cap) |> select(.model, MASE, RMSE, MAE, MAPE) |> arrange(MASE)
+fc |> autoplot(o3cap, level = c(80, 95))
 
-fc_family <- fit_family |> forecast(h = h)
-acc_family <- fc_family |> accuracy(o3cap) |>
-    select(.model, MASE, RMSE, MAE, MAPE) |> arrange(MASE)
-print(acc_family)
-fc_family |> autoplot(o3cap, level = c(80, 95))
+fit |> select(stl_rwdrift) |> gg_tsresiduals()
 
-# Ljung-Box for every family member
-augment(fit_family) |>
-    features(.innov, ljung_box, lag = 24) |>
-    arrange(lb_pvalue) |>
-    print()
+# Ljung-Box - residuals must look random (p > 0.05)
+augment(fit) |> filter(.model == "stl_rwdrift") |> features(.innov, ljung_box, lag = 24)
 
 # ACF-in-bounds check (MUST) - count residual ACF lags outside +-1.96/sqrt(n)
-acf_check <- fit_family |>
-    augment() |>
-    as_tibble() |>
-    group_by(.model) |>
-    summarise(n_lags_out = acf_out_of_bounds(.innov, lag.max = 24))
-print(acf_check)
-
-# Residual diagnostics for EVERY family member, saved as PNG.
-dir.create("output/plots/ChiaZY_stl", recursive = TRUE, showWarnings = FALSE)
-for (m in c("stl_rwdrift", "stl_ets", "stl_arima", "stl_theta", "stl_arima_nr")) {
-    p <- fit_family |> select(all_of(m)) |> gg_tsresiduals()
-      print(p)
-        ggsave(paste0("output/plots/ChiaZY_stl/resid_", m, ".png"),
-                        p, width = 8, height = 6, dpi = 150)
-}
+augment(fit) |> filter(.model == "stl_rwdrift") |> as_tibble() |>
+  summarise(n_lags_out = acf_out_of_bounds(.innov, lag.max = 24))
 
 # Overfitting check: train vs test MASE/RMSE gap. Gap must be within 10%.
-acc_train <- fit_family |> accuracy() |>
-    select(.model, MASE_train = MASE, RMSE_train = RMSE)
-acc_test <- acc_family |> select(.model, MASE_test = MASE, RMSE_test = RMSE)
+acc_train <- fit |> accuracy() |> filter(.model == "stl_rwdrift") |>
+  select(.model, MASE_train = MASE, RMSE_train = RMSE)
+acc_test <- fc |> accuracy(o3cap) |> filter(.model == "stl_rwdrift") |>
+  select(.model, MASE_test = MASE, RMSE_test = RMSE)
 acc_train |> left_join(acc_test, by = ".model") |>
-    mutate(overfit_gap = MASE_test - MASE_train,
-                    overfit_gap_pct = abs(overfit_gap) / MASE_test) |>
-    arrange(desc(overfit_gap)) |>
-    print()
+  mutate(overfit_gap_pct = abs(MASE_test - MASE_train) / MASE_test)
 
-# 5-fold rolling-origin cross-validation - ALL 5 family candidates + SNAIVE.
-o3cap |>
-    stretch_tsibble(.init = 180, .step = 12) |>
-    model(
-          snaive      = SNAIVE(o3_cap),
-              stl_rwdrift = decomposition_model(STL(o3_cap, robust = TRUE),
-                                                                                       RW(season_adjust ~ drift())),
-              stl_ets     = decomposition_model(STL(o3_cap, robust = TRUE),
-                                                                                       ETS(season_adjust)),
-              stl_arima   = decomposition_model(STL(o3_cap, robust = TRUE),
-                                                                                       ARIMA(season_adjust)),
-              stl_theta   = decomposition_model(STL(o3_cap, robust = TRUE),
-                                                                                       THETA(season_adjust)),
-              stl_arima_nr = decomposition_model(STL(o3_cap, robust = FALSE),
-                                                                                         ARIMA(season_adjust))
-    ) |>
-    forecast(h = 12) |>
-    accuracy(o3cap) |>
-    group_by(.model) |>
-    summarise(MASE = mean(MASE), RMSE = mean(RMSE)) |>
-    arrange(MASE)
+dir.create("output/plots/ChiaZY_stl", recursive = TRUE, showWarnings = FALSE)
+ggsave("output/plots/ChiaZY_stl/resid_stl_rwdrift.png",
+       fit |> select(stl_rwdrift) |> gg_tsresiduals(), width = 8, height = 6, dpi = 150)

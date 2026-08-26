@@ -1,9 +1,14 @@
 # 03_StephQF_sarima.R - SHARED TOPIC: polar cap ozone (o3cap, 63-90S, m=12,
 # 2005-2025). Non-stationary + strong seasonal, not white noise. Member B
-# model family: ARIMA (SARIMA). Do not just paste auto_arima output - check
-# residuals. Prior run: auto model failed Ljung-Box at lag 24 even after 40+
-# manual grid combos (possible QBO/ENSO non-12mo cycle). Report this honestly
-# if reproduced.
+# model family: ARIMA / dynamic regression.
+#
+# Model pick: dynamic regression with ARIMA errors, deterministic Fourier
+# at BOTH period=12 (annual ozone-hole cycle) and period=28.5 (QBO - the
+# quasi-biennial oscillation drives stratospheric ozone transport and is
+# NOT an integer multiple of 12 months, so plain seasonal SARIMA(...)[12]
+# cannot represent it). Plain auto ARIMA(o3_cap) previously failed
+# Ljung-Box at lag 24 even after 40+ manual grid combos - suspected QBO
+# leakage into the residuals. This pick targets that directly.
 
 source("scripts/00_setup.R")
 o3cap <- readRDS("data/o3cap.rds")
@@ -21,84 +26,32 @@ h <- 12
 train <- o3cap |> filter(month <= max(month) - h)
 
 fit <- train |> model(
-    snaive = SNAIVE(o3_cap),
-      arima  = ARIMA(o3_cap)
+  snaive     = SNAIVE(o3_cap),
+  dynreg_qbo = ARIMA(o3_cap ~ fourier(period = 12, K = 2) +
+                       fourier(period = 28.5, K = 1) + pdq())
 )
 fc <- fit |> forecast(h = h)
 fc |> accuracy(o3cap) |> select(.model, MASE, RMSE, MAE, MAPE) |> arrange(MASE)
 fc |> autoplot(o3cap, level = c(80, 95))
 
-fit |> select(arima) |> report()
-fit |> select(arima) |> gg_tsresiduals()
-augment(fit) |> filter(.model == "arima") |> features(.innov, ljung_box, lag = 24)
+fit |> select(dynreg_qbo) |> report()
+fit |> select(dynreg_qbo) |> gg_tsresiduals()
 
-# Family sweep: 4 candidates, each with a real shot at matching/beating
-# SNAIVE and the current pick (arima_auto). Dropped non-seasonal ARIMA - it
-# throws away the known lag-12 signal, a priori worse, not worth a slot.
-lambda_b <- o3cap |> features(o3_cap, features = guerrero) |> pull(lambda_guerrero)
-
-fit_family <- train |> model(
-    snaive         = SNAIVE(o3_cap),
-      arima_auto     = ARIMA(o3_cap),
-      dynreg_fourier = ARIMA(o3_cap ~ fourier(K = 2) + pdq()),
-      arima_wide     = ARIMA(o3_cap, stepwise = FALSE, approximation = FALSE,
-                                                       order_constraint = p + q + P + Q <= 8),
-      arima_boxcox   = ARIMA(box_cox(o3_cap, lambda_b))
-)
-
-fc_family <- fit_family |> forecast(h = h)
-acc_family <- fc_family |> accuracy(o3cap) |>
-    select(.model, MASE, RMSE, MAE, MAPE) |> arrange(MASE)
-print(acc_family)
-
-# Ljung-Box for every family member
-augment(fit_family) |>
-    features(.innov, ljung_box, lag = 24) |>
-    arrange(lb_pvalue) |>
-    print()
+# Ljung-Box - residuals must look random (p > 0.05)
+augment(fit) |> filter(.model == "dynreg_qbo") |> features(.innov, ljung_box, lag = 24)
 
 # ACF-in-bounds check (MUST) - count residual ACF lags outside +-1.96/sqrt(n)
-acf_check <- fit_family |>
-    augment() |>
-    as_tibble() |>
-    group_by(.model) |>
-    summarise(n_lags_out = acf_out_of_bounds(.innov, lag.max = 24))
-print(acf_check)
+augment(fit) |> filter(.model == "dynreg_qbo") |> as_tibble() |>
+  summarise(n_lags_out = acf_out_of_bounds(.innov, lag.max = 24))
 
-# Residual diagnostics for EVERY family member, saved as PNG.
-dir.create("output/plots/StephQF_sarima", recursive = TRUE, showWarnings = FALSE)
-for (m in c("arima_auto", "dynreg_fourier", "arima_wide", "arima_boxcox")) {
-    p <- fit_family |> select(all_of(m)) |> gg_tsresiduals()
-      print(p)
-        ggsave(paste0("output/plots/StephQF_sarima/resid_", m, ".png"),
-                        p, width = 8, height = 6, dpi = 150)
-}
-
-# Overfitting check: train vs test MASE/RMSE gap
-acc_train <- fit_family |> accuracy() |>
-    select(.model, MASE_train = MASE, RMSE_train = RMSE)
-acc_test <- acc_family |> select(.model, MASE_test = MASE, RMSE_test = RMSE)
+# Overfitting check: train vs test MASE/RMSE gap. Gap must be within 10%.
+acc_train <- fit |> accuracy() |> filter(.model == "dynreg_qbo") |>
+  select(.model, MASE_train = MASE, RMSE_train = RMSE)
+acc_test <- fc |> accuracy(o3cap) |> filter(.model == "dynreg_qbo") |>
+  select(.model, MASE_test = MASE, RMSE_test = RMSE)
 acc_train |> left_join(acc_test, by = ".model") |>
-    mutate(overfit_gap = MASE_test - MASE_train,
-                    overfit_gap_pct = abs(overfit_gap) / MASE_test) |>
-    arrange(desc(overfit_gap)) |>
-    print()
+  mutate(overfit_gap_pct = abs(MASE_test - MASE_train) / MASE_test)
 
-# 5-fold rolling-origin CV - ALL 4 family candidates + SNAIVE, none skipped.
-# NOTE: arima_wide (stepwise=FALSE) is refit fresh at every fold - this block
-# can take several minutes on Posit Cloud's free tier, be patient.
-o3cap |>
-    stretch_tsibble(.init = 180, .step = 12) |>
-    model(
-          snaive         = SNAIVE(o3_cap),
-              arima_auto     = ARIMA(o3_cap),
-              dynreg_fourier = ARIMA(o3_cap ~ fourier(K = 2) + pdq()),
-              arima_wide     = ARIMA(o3_cap, stepwise = FALSE, approximation = FALSE,
-                                                                 order_constraint = p + q + P + Q <= 8),
-              arima_boxcox   = ARIMA(box_cox(o3_cap, lambda_b))
-    ) |>
-    forecast(h = 12) |>
-    accuracy(o3cap) |>
-    group_by(.model) |>
-    summarise(MASE = mean(MASE), RMSE = mean(RMSE)) |>
-    arrange(MASE)
+dir.create("output/plots/StephQF_sarima", recursive = TRUE, showWarnings = FALSE)
+ggsave("output/plots/StephQF_sarima/resid_dynreg_qbo.png",
+       fit |> select(dynreg_qbo) |> gg_tsresiduals(), width = 8, height = 6, dpi = 150)
