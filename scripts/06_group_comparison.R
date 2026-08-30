@@ -14,7 +14,7 @@ train <- o3cap |> filter(month <= max(month) - h)
 # diagnostics behind each pick - ETS and TSLM were the original A/C
 # picks but neither could pass Ljung-Box for this topic under any tested
 # spec; NNAR and Combination replace them):
-#   A - NNAR (Neural Network Autoregression)      (02_ChanYH_ets.R)
+#   A - NNAR (Neural Network Autoregression)      (02_ChanYH_nnar.R)
 #   B - ARIMA errors + annual(K=1)/QBO(K=1) Fourier (03_StephQF_sarima.R)
 #   C - Combination (avg of arima_B + stl_D)      (04_HamGQ_combination.R)
 #   D - STL(robust) + ARIMA(remainder)            (05_ChiaZY_stl.R)

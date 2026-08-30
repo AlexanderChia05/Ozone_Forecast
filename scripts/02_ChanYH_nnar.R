@@ -1,4 +1,4 @@
-# 02_ChanYH_ets.R - SHARED TOPIC: polar cap ozone (o3cap, 63-90S, m=12,
+# 02_ChanYH_nnar.R - SHARED TOPIC: polar cap ozone (o3cap, 63-90S, m=12,
 # 2005-2025). Non-stationary (recovery trend post-Montreal Protocol) +
 # strong seasonal, not white noise. Member A model family: NNAR (Neural
 # Network Autoregression).
