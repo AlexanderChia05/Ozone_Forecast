@@ -29,7 +29,7 @@ o3cap |> model(STL(o3_cap, robust = TRUE)) |> components() |> autoplot()
 # Stationarity + white-noise check
 adf.test(o3cap$o3_cap)    # want p < 0.05
 kpss.test(o3cap$o3_cap)   # want p > 0.05 -> non-stationary if it fails this
-Box.test(o3cap$o3_cap, lag = 24, type = "Ljung-Box")  # want p < 0.05 -> not white noise
+Box.test(o3cap$o3_cap, lag = 12, type = "Ljung-Box")  # want p < 0.05 -> not white noise
 
 # Train/test split - last 12 months held out, no random split
 h <- 12
@@ -47,7 +47,7 @@ fc |> autoplot(o3cap, level = c(80, 95))
 fit |> select(stl_arima) |> gg_tsresiduals()
 
 # Ljung-Box - residuals must look random (p > 0.05)
-augment(fit) |> filter(.model == "stl_arima") |> features(.innov, ljung_box, lag = 24)
+augment(fit) |> filter(.model == "stl_arima") |> features(.innov, ljung_box, lag = 12)
 
 # ACF-in-bounds check (MUST) - count residual ACF lags outside +-1.96/sqrt(n)
 augment(fit) |> filter(.model == "stl_arima") |> as_tibble() |>

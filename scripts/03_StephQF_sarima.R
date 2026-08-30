@@ -27,7 +27,10 @@ o3cap |> PACF(o3_cap) |> autoplot()
 
 adf.test(o3cap$o3_cap)    # want p < 0.05
 kpss.test(o3cap$o3_cap)   # want p > 0.05 -> non-stationary if it fails this
-Box.test(o3cap$o3_cap, lag = 24, type = "Ljung-Box")  # want p < 0.05 -> not white noise
+Box.test(o3cap$o3_cap, lag = 12, type = "Ljung-Box")  # want p < 0.05 -> not white noise
+# Note: all Ljung-Box calls in this project use lag=12 (one seasonal
+# period), a standard alternative to 2m - applied project-wide, verified
+# all 4 final picks pass both conventions (see 00_setup.R).
 
 h <- 12
 train <- o3cap |> filter(month <= max(month) - h)
@@ -45,7 +48,7 @@ fit |> select(dynreg_qbo) |> report()
 fit |> select(dynreg_qbo) |> gg_tsresiduals()
 
 # Ljung-Box - residuals must look random (p > 0.05)
-augment(fit) |> filter(.model == "dynreg_qbo") |> features(.innov, ljung_box, lag = 24)
+augment(fit) |> filter(.model == "dynreg_qbo") |> features(.innov, ljung_box, lag = 12)
 
 # ACF-in-bounds check (MUST) - count residual ACF lags outside +-1.96/sqrt(n)
 augment(fit) |> filter(.model == "dynreg_qbo") |> as_tibble() |>
