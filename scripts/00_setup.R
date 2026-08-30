@@ -1,7 +1,7 @@
 # 00_setup.R — packages. Run once per Posit Cloud session.
 # Free tier 1GB RAM. Do NOT install prophet (Stan compile fails/times out).
 
-pkgs <- c("fpp3", "tseries", "zoo")
+pkgs <- c("fpp3", "tseries", "zoo", "forecast")
 new <- pkgs[!pkgs %in% installed.packages()[, "Package"]]
 if (length(new)) install.packages(new)
 
@@ -10,6 +10,15 @@ library(purrr)
 library(tidyr)
 library(fpp3)
 library(tseries)
+
+# NOTE: forecast package is installed above (member C / BATS needs it,
+# 04_HamGQ_bats.R and 06_group_comparison.R) but deliberately NOT attached
+# with library() here - forecast::accuracy()/forecast() would mask
+# fabletools::accuracy()/forecast() (both packages export same-named
+# generics), which every other script in this project calls unqualified
+# assuming the fabletools version. Scripts that need BATS call
+# forecast::bats(), forecast::forecast(), forecast::accuracy() explicitly
+# instead, so both ecosystems coexist safely in the same session.
 
 # Shared topic (all 4 members): polar cap ozone (o3cap, 63-90S, m=12).
 # acf_out_of_bounds(): count residual ACF lags (1..lag.max) exceeding the
